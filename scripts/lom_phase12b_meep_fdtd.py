@@ -145,7 +145,13 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     results = []
     errors = []
-    for resolution in args.resolutions:
+    resolution_plan = list(dict.fromkeys(args.resolutions))
+    escalation_resolutions = [100, 120, 160]
+    next_escalation = 0
+    index = 0
+    while index < len(resolution_plan):
+        resolution = resolution_plan[index]
+        index += 1
         print(f"\n=== Phase 12-B FDTD: resolution={resolution} px/um ===", flush=True)
         try:
             result = run_one(resolution, args.run_time, args.output_dir)
@@ -161,6 +167,23 @@ def main() -> int:
             errors.append(error)
             print(json.dumps(error, indent=2), file=sys.stderr, flush=True)
 
+        successful = sorted(results, key=lambda item: item["resolution_px_per_um"])
+        if index >= len(resolution_plan) and len(successful) >= 2:
+            last_two = successful[-2:]
+            change_pct = abs(
+                last_two[-1]["fdtd_neff_phase_fit"] - last_two[-2]["fdtd_neff_phase_fit"]
+            ) / abs(last_two[-1]["fdtd_neff_phase_fit"]) * 100.0
+            if change_pct > 0.5 and next_escalation < len(escalation_resolutions):
+                next_resolution = escalation_resolutions[next_escalation]
+                next_escalation += 1
+                if next_resolution > max(item["resolution_px_per_um"] for item in successful):
+                    resolution_plan.append(next_resolution)
+                    print(
+                        f"Convergence change is {change_pct:.4f}% (>0.5%); "
+                        f"adding resolution {next_resolution}.",
+                        flush=True,
+                    )
+
     csv_path = args.output_dir / "lom_phase12b_convergence.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         fields = [
@@ -174,6 +197,15 @@ def main() -> int:
         for row in results:
             writer.writerow({k: row.get(k) for k in fields})
 
+    successful = sorted(results, key=lambda item: item["resolution_px_per_um"])
+    convergence_change_pct = None
+    if len(successful) >= 2:
+        convergence_change_pct = abs(
+            successful[-1]["fdtd_neff_phase_fit"] - successful[-2]["fdtd_neff_phase_fit"]
+        ) / abs(successful[-1]["fdtd_neff_phase_fit"]) * 100.0
+    converged = convergence_change_pct is not None and convergence_change_pct <= 0.5
+    analytical_agreement = bool(successful) and successful[-1]["relative_error_percent"] <= 1.0
+
     report = {
         "phase": "12-B",
         "model": "2D lossless isotropic nondispersive symmetric slab FDTD benchmark",
@@ -182,7 +214,11 @@ def main() -> int:
         "cladding_material": "SiO2",
         "core_thickness_um": CORE_THICKNESS_UM,
         "analytical_neff_reference": ANALYTICAL_NEFF,
-        "resolutions_px_per_um": args.resolutions,
+        "requested_resolutions_px_per_um": args.resolutions,
+        "executed_resolutions_px_per_um": [r["resolution_px_per_um"] for r in successful],
+        "convergence_change_last_two_percent": convergence_change_pct,
+        "convergence_gate_passed_le_0_5_percent": converged,
+        "analytical_agreement_gate_passed_le_1_percent": analytical_agreement,
         "run_time_um_over_c": args.run_time,
         "results": results,
         "errors": errors,
@@ -194,12 +230,16 @@ def main() -> int:
             "A successful workflow run is not proof of experimental performance or novelty.",
             "Convergence and analytical agreement must be assessed from the generated data; no result is assumed in advance."
         ],
-        "overall_status": "completed_with_errors" if errors else "completed",
+        "overall_status": (
+            "simulation_error" if errors else
+            "benchmark_gates_passed" if converged and analytical_agreement else
+            "completed_but_gates_not_met"
+        ),
     }
     report_path = args.output_dir / "lom_phase12b_fdtd_report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nWrote {csv_path} and {report_path}", flush=True)
-    return 1 if errors else 0
+    return 1 if errors else (0 if converged and analytical_agreement else 2)
 
 
 if __name__ == "__main__":
