@@ -1,0 +1,37 @@
+name: Phase 12-B — Meep environment check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  meep-environment:
+    name: Verify Meep runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          miniforge-version: latest
+          environment-file: environment.yml
+          activate-environment: lom-meep
+          use-mamba: true
+
+      - name: Verify Meep installation
+        shell: bash -el {0}
+        run: python scripts/check_meep_environment.py
+
+      - name: Upload environment report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meep-environment-report
+          path: meep_environment_report.json
+          if-no-files-found: ignore
