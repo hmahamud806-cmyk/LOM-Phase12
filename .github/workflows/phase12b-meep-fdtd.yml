@@ -1,0 +1,46 @@
+name: Phase 12-B — Meep FDTD slab benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_time:
+        description: "Simulation run time (Meep units)"
+        required: true
+        default: "150"
+
+permissions:
+  contents: read
+
+jobs:
+  fdtd-benchmark:
+    name: Run slab FDTD benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          miniforge-version: latest
+          environment-file: environment.yml
+          activate-environment: lom-meep
+          use-mamba: true
+
+      - name: Run 2D Meep FDTD benchmark
+        shell: bash -el {0}
+        run: |
+          python scripts/lom_phase12b_meep_fdtd.py \
+            --resolutions 30 45 60 80 \
+            --run-time "${{ inputs.run_time }}" \
+            --output-dir phase12b_results
+
+      - name: Upload FDTD data and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase12b-fdtd-results
+          path: phase12b_results/
+          if-no-files-found: warn
