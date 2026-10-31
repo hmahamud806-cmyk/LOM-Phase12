@@ -1,0 +1,7 @@
+name: lom-meep
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pymeep
+  - numpy
